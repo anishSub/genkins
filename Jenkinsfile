@@ -3,11 +3,11 @@ pipeline {
     
     environment {
         DOCKER_HOST = "unix:///var/run/docker.sock"
-        DOCKER_IMAGE = "sushilicp/my-web-app"
+        DOCKER_IMAGE = "anish171/my-web-app"
         DOCKER_TAG = "${env.BUILD_ID ?: 'latest'}"
         CONTAINER_NAME = "my-web-app-${env.BUILD_NUMBER}"
         GOOGLE_CHAT_WEBHOOK = "https://chat.googleapis.com/v1/spaces/AAQAaQR_SNA/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=RR8wTSfb0py5U2VnLa53xYIJp2yYxVSWV4wP4ovXPxk"
-        DEPLOYMENT_URL = "http://localhost:8088"  // Update this
+        DEPLOYMENT_URL = "http://localhost:8080"  // Update this
         DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
         HOST_PORT = "8088"
     }
@@ -16,8 +16,8 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main', 
-                url: 'https://github.com/sushilicp/html-demo.git',
-                credentialsId: ''
+                url: 'https://github.com/anishSub/genkins.git',
+                credentialsId: '123'
             }
         }
          stage('Login to Docker Hub') {
@@ -42,11 +42,11 @@ pipeline {
                 script {
                     withCredentials([usernamePassword(
                         credentialsId: 'docker-hub-credentials',
-                        passwordVariable: 'Anish#937',
-                        usernameVariable: 'anish171'
+                        passwordVariable: 'DOCKER_PASSWORD',
+                        usernameVariable: 'DOCKER_USERNAME'
                     )]) {
                         sh """
-                            docker login -u ${anish171} -p ${Anish#937}
+                            docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
                             docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
                         """
                     }

@@ -44,7 +44,7 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD',
                         usernameVariable: 'DOCKER_USERNAME'
                     )]) {
-                        bat """
+                        sh """
                             docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%
                             docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .
                         """
@@ -156,7 +156,7 @@ def sendGoogleChatNotification(String message) {
         def escapedMessage = message.replace('"', '""').replace('\n', '^n').replace('%', '%%').replace('&', '^&')
         def payload = """{"text":"${escapedMessage}"}"""
         
-        bat """
+        sh """
             curl -X POST ^
             -H "Content-Type: application/json" ^
             -d "${payload}" ^

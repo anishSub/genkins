@@ -1,12 +1,11 @@
 pipeline {
     agent any
-    
+
     environment {
-        DOCKER_HOST = "npipe:////./pipe/docker_engine" // Windows Docker endpoint
         DOCKER_IMAGE = "sushilicp/my-web-app"
         DOCKER_TAG = "${env.BUILD_ID ?: 'latest'}"
         CONTAINER_NAME = "my-web-app-${env.BUILD_NUMBER}"
-        GOOGLE_CHAT_WEBHOOK = credentials('google-chat-webhook') // Secure webhook
+        GOOGLE_CHAT_WEBHOOK = credentials('google-chat-webhook')
         DEPLOYMENT_URL = "http://localhost:8088"
         DOCKER_HUB_CREDENTIALS = credentials('docker-hub-credentials')
         HOST_PORT = "8088"
@@ -15,21 +14,22 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', 
+                git branch: 'main',
                     url: 'https://github.com/anishSub/genkins.git',
-                    credentialsId: ''
+                    credentialsId: '' // Add GitHub credentials ID here if private repo
             }
         }
+
         stage('Login to Docker Hub') {
             steps {
                 script {
                     withCredentials([usernamePassword(
                         credentialsId: 'docker-hub-credentials',
-                        passwordVariable: 'DOCKER_PASSWORD',
-                        usernameVariable: 'DOCKER_USERNAME'
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
                     )]) {
-                        sh"""
-                            docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%
+                        sh """
+                            echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
                         """
                     }
                 }
@@ -38,52 +38,41 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'docker-hub-credentials',
-                        passwordVariable: 'DOCKER_PASSWORD',
-                        usernameVariable: 'DOCKER_USERNAME'
-                    )]) {
-                        sh """
-                            docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%
-                            docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% .
-                        """
-                    }
-                }
+                sh """
+                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                """
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
-                script {
-                    sh """
-                        docker push %DOCKER_IMAGE%:%DOCKER_TAG%
-                        docker push %DOCKER_IMAGE%:latest
-                    """
-                }
+                sh """
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    docker push ${DOCKER_IMAGE}:latest
+                """
             }
         }
 
         stage('Deploy') {
             steps {
                 script {
-                    sh"""
-                        # Find container using port ${HOST_PORT}
-                        CONTAINER_USING_PORT=\$(docker ps --format '{{.Names}}' --filter "publish=${HOST_PORT}" | head -n 1)
-                        
-                        # Stop and remove if found
+                    sh """
+                        # Stop container using HOST_PORT if running
+                        CONTAINER_USING_PORT=\$(docker ps --filter "publish=${HOST_PORT}" --format "{{.Names}}" | head -n 1)
+
                         if [ -n "\$CONTAINER_USING_PORT" ]; then
-                            echo "Found container \$CONTAINER_USING_PORT using port ${HOST_PORT}, stopping it..."
+                            echo "Stopping container using port ${HOST_PORT}: \$CONTAINER_USING_PORT"
                             docker stop \$CONTAINER_USING_PORT || true
                             docker rm \$CONTAINER_USING_PORT || true
                         fi
-                        
-                        # Remove our named container if it exists
-                        if docker container inspect ${CONTAINER_NAME} >/dev/null 2>&1; then
+
+                        # Remove container if same name already exists
+                        if docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}\$"; then
                             docker stop ${CONTAINER_NAME} || true
                             docker rm ${CONTAINER_NAME} || true
                         fi
-                        
+
                         # Run new container
                         docker run -d \
                             --name ${CONTAINER_NAME} \
@@ -97,70 +86,44 @@ pipeline {
 
     post {
         always {
-            node('built-in') {
-                script {
-                    sh """
-                        docker logout || exit 0
-                        docker ps -a --filter "name=%CONTAINER_NAME%" --format "{{.ID}}" > temp.txt
-                        for /f %%i in (temp.txt) do docker rm -f %%i || exit 0
-                        del temp.txt || exit 0
-                    """
-                }
-            }
+            sh 'docker logout || true'
         }
-    
+
         success {
-            node('built-in') {
-                script {
-                    def message = """
-                    🚀 *Deployment Successful* 
-                    *Build*: #${env.BUILD_NUMBER}
-                    *Image*: ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}
-                    *Container*: ${env.CONTAINER_NAME}
-                    """
-                    sendGoogleChatNotification(message)
-                }
+            script {
+                def message = """
+                ✅ *Deployment Successful*
+                *Build:* #${env.BUILD_NUMBER}
+                *Image:* ${DOCKER_IMAGE}:${DOCKER_TAG}
+                *URL:* ${DEPLOYMENT_URL}
+                """
+                sendGoogleChatNotification(message)
             }
         }
+
         failure {
-            node('built-in') {
-                script {
-                    def logs = sh(
-                        script: """
-                            docker container inspect %CONTAINER_NAME% > nul 2>&1
-                            if %ERRORLEVEL% == 0 (
-                                docker logs --tail 50 %CONTAINER_NAME% 2>&1 || exit 0
-                            ) else (
-                                echo Container %CONTAINER_NAME% does not exist
-                            )
-                        """,
-                        returnStdout: true
-                    ).trim()
-                    
-                    def message = """
-                    🔴 *Deployment Failed* 
-                    *Build*: #${env.BUILD_NUMBER}
-                    *Error*: ${currentBuild.currentResult}
-                    *Logs*: ${logs}
-                    """
-                    sendGoogleChatNotification(message)
-                }
+            script {
+                def logs = sh(script: "docker logs --tail 50 ${CONTAINER_NAME} || echo 'No logs available'", returnStdout: true).trim()
+                def message = """
+                ❌ *Deployment Failed*
+                *Build:* #${env.BUILD_NUMBER}
+                *Error:* ${currentBuild.currentResult}
+                *Logs:* ${logs}
+                """
+                sendGoogleChatNotification(message)
             }
         }
     }
 }
 
 def sendGoogleChatNotification(String message) {
-    node('built-in') {
-        // Escape message for JSON and batch
-        def escapedMessage = message.replace('"', '""').replace('\n', '^n').replace('%', '%%').replace('&', '^&')
-        def payload = """{"text":"${escapedMessage}"}"""
-        
-        sh """
-            curl -X POST ^
-            -H "Content-Type: application/json" ^
-            -d "${payload}" ^
-            "%GOOGLE_CHAT_WEBHOOK%" || echo Notification failed
-        """
-    }
+    def escapedMessage = message.replace('"', '\\"')
+    def payload = """{"text": "${escapedMessage}"}"""
+
+    sh """
+        curl -X POST \
+        -H "Content-Type: application/json" \
+        -d '${payload}' \
+        "${GOOGLE_CHAT_WEBHOOK}" || echo "Notification failed"
+    """
 }

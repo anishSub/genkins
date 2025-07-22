@@ -28,7 +28,7 @@ pipeline {
                         passwordVariable: 'DOCKER_PASSWORD',
                         usernameVariable: 'DOCKER_USERNAME'
                     )]) {
-                        bat """
+                        sh"""
                             docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%
                         """
                     }
@@ -56,7 +56,7 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    bat """
+                    sh """
                         docker push %DOCKER_IMAGE%:%DOCKER_TAG%
                         docker push %DOCKER_IMAGE%:latest
                     """
@@ -67,7 +67,7 @@ pipeline {
         stage('Deploy') {
             steps {
                 script {
-                    sh """
+                    sh"""
                         # Find container using port ${HOST_PORT}
                         CONTAINER_USING_PORT=\$(docker ps --format '{{.Names}}' --filter "publish=${HOST_PORT}" | head -n 1)
                         
@@ -125,7 +125,7 @@ pipeline {
         failure {
             node('built-in') {
                 script {
-                    def logs = bat(
+                    def logs = sh(
                         script: """
                             docker container inspect %CONTAINER_NAME% > nul 2>&1
                             if %ERRORLEVEL% == 0 (

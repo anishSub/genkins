@@ -99,7 +99,7 @@ pipeline {
         always {
             node('built-in') {
                 script {
-                    bat """
+                    sh """
                         docker logout || exit 0
                         docker ps -a --filter "name=%CONTAINER_NAME%" --format "{{.ID}}" > temp.txt
                         for /f %%i in (temp.txt) do docker rm -f %%i || exit 0
